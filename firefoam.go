@@ -1,3 +1,4 @@
+// © Golden Grizzly Software Consulting LLC
 package firefoam
 
 import (
