@@ -6,38 +6,43 @@ import (
 )
 
 type RateLimit struct {
-	Duration    time.Duration
-	MaxProc     int
-	CurrentProc *int
-	Mut         *sync.Mutex
+	duration    time.Duration
+	maxProc     int
+	currentProc int
+	mut         *sync.RWMutex
 }
 
 func NewRateLimit(maxProc int, duration time.Duration) RateLimit {
-	count := 0
-	var mut sync.Mutex
+	var mut sync.RWMutex
 
 	return RateLimit{
-		Duration:    duration,
-		MaxProc:     maxProc,
-		CurrentProc: &count,
-		Mut:         &mut,
+		duration:    duration,
+		maxProc:     maxProc,
+		currentProc: 0,
+		mut:         &mut,
 	}
 }
 
-func (r *RateLimit) TakeItToTheLimit() bool {
-	r.Mut.Lock()
-	defer r.Mut.Unlock()
+func (r *RateLimit) GetCurrentProcs() int {
+	r.mut.RLock()
+	defer r.mut.RUnlock()
+	return r.currentProc
+}
 
-	if *r.CurrentProc >= r.MaxProc {
+func (r *RateLimit) TakeItToTheLimit() bool {
+	r.mut.Lock()
+	defer r.mut.Unlock()
+
+	if r.currentProc >= r.maxProc {
 		return false
 	}
 
-	*r.CurrentProc += 1
+	r.currentProc += 1
 
-	time.AfterFunc(r.Duration, func() {
-		r.Mut.Lock()
-		defer r.Mut.Unlock()
-		*r.CurrentProc -= 1
+	time.AfterFunc(r.duration, func() {
+		r.mut.Lock()
+		defer r.mut.Unlock()
+		r.currentProc -= 1
 	})
 	return true
 }
