@@ -1,22 +1,27 @@
-// © Golden Grizzly Software Consulting LLC
+// © Golden Grizzly Software Consulting LLC 2023
 package firefoam
 
 import (
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
-type RateLimit struct {
+type RateLimiter struct {
 	duration    time.Duration
-	maxProc     int
-	currentProc int
+	maxProc     int64
+	currentProc int64
 	mut         *sync.RWMutex
 }
 
-func NewRateLimit(maxProc int, duration time.Duration) RateLimit {
+func NewRateLimit(maxProc int64, duration time.Duration) RateLimiter {
 	var mut sync.RWMutex
 
-	return RateLimit{
+	if maxProc < 1 {
+		panic("maxProc was less than 1")
+	}
+
+	return RateLimiter{
 		duration:    duration,
 		maxProc:     maxProc,
 		currentProc: 0,
@@ -24,13 +29,12 @@ func NewRateLimit(maxProc int, duration time.Duration) RateLimit {
 	}
 }
 
-func (r *RateLimit) GetCurrentProcs() int {
-	r.mut.RLock()
-	defer r.mut.RUnlock()
-	return r.currentProc
+func (r *RateLimiter) GetCurrentProcs() int64 {
+	return atomic.LoadInt64(&r.currentProc)
 }
 
-func (r *RateLimit) TakeItToTheLimit() bool {
+// 'Hard limit'
+func (r *RateLimiter) LimitWithMut() bool {
 	r.mut.Lock()
 	defer r.mut.Unlock()
 
@@ -40,10 +44,26 @@ func (r *RateLimit) TakeItToTheLimit() bool {
 
 	r.currentProc += 1
 
-	time.AfterFunc(r.duration, func() {
-		r.mut.Lock()
-		defer r.mut.Unlock()
-		r.currentProc -= 1
-	})
+	r.decAfterTime()
+
 	return true
+}
+
+// 'Soft' limit
+func (r *RateLimiter) LimitWithAtomic() bool {
+	if atomic.LoadInt64(&r.currentProc) >= atomic.LoadInt64(&r.maxProc) {
+		return false
+	}
+
+	atomic.AddInt64(&r.currentProc, 1)
+
+	r.decAfterTime()
+
+	return true
+}
+
+func (r *RateLimiter) decAfterTime() {
+	time.AfterFunc(r.duration, func() {
+		atomic.AddInt64(&r.currentProc, -1)
+	})
 }
